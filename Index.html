@@ -1,0 +1,900 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Furniture Rescue Race — Prototype (Updated)</title>
+<style>
+  :root{
+    --bg:#f0f0f2;
+    --panel:#ffffff;
+    --accent:#2b8a3e;
+    --danger:#c94a4a;
+    --muted:#666;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  }
+  html,body { height:100%; margin:0; background:var(--bg); }
+  #container { display:flex; height:100vh; gap:10px; padding:10px; box-sizing:border-box; }
+  #game-area { flex:1; background:linear-gradient(#ddd,#ccc); border-radius:8px; position:relative; overflow:hidden; }
+  canvas { display:block; background:#ddd; width:100%; height:100%; }
+  #ui { width:320px; display:flex; flex-direction:column; gap:10px; }
+  .panel { background:var(--panel); border-radius:8px; padding:12px; box-shadow:0 2px 6px rgba(0,0,0,.08); }
+  h2{margin:0 0 8px 0; font-size:16px;}
+  .inventory { display:flex; gap:6px; flex-wrap:wrap; }
+  .slot { width:60px; height:60px; border-radius:6px; background:#f7f7f8; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:12px; color:var(--muted); border:2px solid transparent; }
+  .slot.selected { border-color:var(--accent); box-shadow:0 0 0 3px rgba(43,138,62,.08); }
+  .slot small{ font-size:10px; color:#444; }
+  #mode-controls{ display:flex; gap:8px; flex-wrap:wrap; }
+  button { cursor:pointer; padding:8px 10px; border-radius:6px; border:1px solid #ccc; background:#fff; font-weight:600; }
+  button.primary { background:var(--accent); color:#fff; border-color:transparent; }
+  button.ghost { background:transparent; border:1px solid #ccc; }
+  #log { max-height:140px; overflow:auto; font-size:13px; color:#333; margin-top:8px; }
+  #bench-ui { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:520px; display:none; z-index:80; }
+  .bench-panel{ background:linear-gradient(#fff,#fafafa); border-radius:8px; padding:14px; box-shadow:0 6px 30px rgba(0,0,0,.25); }
+  .bench-row{ display:flex; gap:10px; align-items:center; margin-bottom:8px; }
+  .recipe { border:1px dashed #ccc; padding:8px; flex:1; border-radius:6px; background:#fff; }
+  .recipe h3{ margin:0 0 6px 0; font-size:14px; }
+  .recipe small{ color:#666; }
+  .progress-wrap{ background:#eee; height:16px; border-radius:8px; overflow:hidden; width:100%; }
+  .progress-bar{ background:var(--accent); height:100%; width:0%; transition:width .1s linear; }
+  #topbar { position:absolute; left:10px; top:10px; right:10px; display:flex; justify-content:space-between; z-index:50; }
+  #status { display:flex; gap:12px; align-items:center; }
+  .badge { background:#fff; padding:6px 10px; border-radius:999px; box-shadow:0 2px 6px rgba(0,0,0,.08); font-weight:700; }
+  #controls-help{ font-size:13px; color:#333; margin-top:6px; }
+  #hint{ font-size:13px; color:var(--muted); margin-top:6px; }
+  .muted{ color:var(--muted); font-size:13px; }
+  #footer-note{ font-size:12px; color:#444; margin-top:8px; }
+  /* Start overlay */
+  #start-overlay, #end-overlay { position:absolute; inset:0; background:linear-gradient(rgba(0,0,0,.45), rgba(0,0,0,.45)); display:flex; align-items:center; justify-content:center; z-index:200; }
+  .overlay-panel { background:var(--panel); padding:18px; border-radius:10px; width:720px; max-width:94%; box-shadow:0 12px 40px rgba(0,0,0,.5); }
+  .overlay-panel h1{ margin:0 0 8px 0; font-size:20px; }
+  .overlay-actions { display:flex; gap:10px; margin-top:12px; }
+  .progress-line { margin-top:8px; font-weight:700; color:var(--accent); }
+  @media (max-width:900px){
+    #ui{ width:280px; }
+  }
+</style>
+</head>
+<body>
+<div id="container">
+  <div id="game-area" class="panel">
+    <div id="topbar">
+      <div id="status" class="panel" style="display:flex; gap:8px; align-items:center;">
+        <div class="badge" id="modeBadge">Relaxed</div>
+        <div id="timer" class="badge" style="min-width:140px;">Timer: —</div>
+        <div id="score" class="badge">Score: 0</div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <div class="muted" id="sustain">Saved: 0</div>
+        <button id="resetBtn" title="Reset prototype" class="ghost">Reset</button>
+      </div>
+    </div>
+
+    <canvas id="game" width="1100" height="700" aria-label="Furniture Rescue Race game canvas"></canvas>
+
+    <!-- Bench UI modal -->
+    <div id="bench-ui">
+      <div class="bench-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h2>Workbench</h2>
+          <div>
+            <button id="closeBench" class="ghost">Close</button>
+          </div>
+        </div>
+
+        <div class="bench-row">
+          <div style="flex:1;">
+            <strong>Inventory (click to select)</strong>
+            <div id="bench-inv" style="display:flex; gap:8px; margin-top:6px;"></div>
+            <div style="margin-top:6px;">
+              <button id="repairBtn" class="primary">Repair selected</button>
+              <button id="discardBtn" class="ghost">Discard selected</button>
+            </div>
+            <div id="repairProgressWrap" style="margin-top:8px; display:none;">
+              <div class="progress-wrap"><div id="repairBar" class="progress-bar"></div></div>
+              <div id="repairText" class="muted" style="margin-top:6px;">Repairing...</div>
+            </div>
+          </div>
+
+          <div style="width:220px;">
+            <strong>Recipes</strong>
+            <div style="margin-top:8px; display:flex; flex-direction:column; gap:8px;">
+              <div class="recipe" id="recipe-stool">
+                <h3>Stool</h3>
+                <small>Needs: 1 Top + 3 Legs (parts must be repaired to ≥60%)</small>
+                <div style="margin-top:8px;">
+                  <button class="assembleBtn" data-recipe="stool">Assemble Stool</button>
+                </div>
+              </div>
+
+              <div class="recipe" id="recipe-chair">
+                <h3>Chair</h3>
+                <small>Needs: 1 Top + 4 Legs + 1 Cushion (parts must be repaired to ≥60%)</small>
+                <div style="margin-top:8px;">
+                  <button class="assembleBtn" data-recipe="chair">Assemble Chair</button>
+                </div>
+              </div>
+
+              <div class="recipe" id="recipe-table">
+                <h3>Side Table</h3>
+                <small>Needs: 1 Top + 4 Legs (parts must be repaired to ≥60%)</small>
+                <div style="margin-top:8px;">
+                  <button class="assembleBtn" data-recipe="table">Assemble Side Table</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div id="bench-message" class="muted" style="margin-top:8px;">Tip: Repair parts before assembling.</div>
+      </div>
+    </div>
+
+    <!-- Start overlay -->
+    <div id="start-overlay" aria-hidden="false">
+      <div class="overlay-panel">
+        <h1>Furniture Rescue Race — Beginner Instructions</h1>
+        <p>Welcome! This short prototype teaches reuse and repair. You'll move around the workshop, collect used parts (Tops, Legs, Cushions), repair them at the <strong>Bench</strong>, assemble furniture from blueprints, and deliver it.</p>
+        <ul>
+          <li>Move: Arrow keys (or WASD).</li>
+          <li>Interact / pick up / use bench / deliver: Press <strong>E</strong>.</li>
+          <li>Open the bench when near it to repair and assemble (use your mouse to select items in the bench UI).</li>
+        </ul>
+        <p><strong>Goal in challenge mode:</strong> Deliver 3 assembled furniture items within 5 minutes.</p>
+        <div style="margin-top:10px;">
+          <label><input type="radio" name="startMode" value="relaxed" checked> Relaxed (no timer)</label>
+          <label style="margin-left:12px;"><input type="radio" name="startMode" value="challenge"> 5-min Challenge (deliver 3 items)</label>
+        </div>
+        <div class="overlay-actions">
+          <button id="startBtn" class="primary">Start Game</button>
+          <button id="startJustInspect" class="ghost">Start & Inspect Workshop</button>
+        </div>
+        <div class="muted" style="margin-top:8px;">Tip: If you get stuck, parts will respawn automatically so you can always progress.</div>
+      </div>
+    </div>
+
+    <!-- End overlay (win/lose) -->
+    <div id="end-overlay" style="display:none" aria-hidden="true">
+      <div class="overlay-panel">
+        <h1 id="end-title">Result</h1>
+        <p id="end-message"></p>
+        <p id="end-stats" class="muted"></p>
+        <div style="margin-top:12px;">
+          <button id="end-restart" class="primary">Play Again (Relaxed)</button>
+          <button id="end-restart-challenge" class="ghost">Play Challenge</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="ui">
+    <div class="panel">
+      <h2>Inventory</h2>
+      <div class="inventory" id="inventory"></div>
+      <div id="controls-help" class="muted">Move: Arrow keys (WASD ok). Interact: E. Click items in bench to select.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Game Modes</h2>
+      <div id="mode-controls">
+        <button id="relaxedBtn" class="primary">Relaxed Mode</button>
+        <button id="challengeBtn">5-min Challenge</button>
+      </div>
+      <div id="log" aria-live="polite"></div>
+    </div>
+
+    <div class="panel">
+      <h2>How it teaches reuse</h2>
+      <p class="muted">Collect used parts around the workshop, repair them at the bench, and assemble furniture. Repairs save materials (you'll see "Saved" points) and reduce waste. In challenge mode aim to complete orders quickly; in relaxed mode practice repairs and assembly without a clock.</p>
+      <div id="footer-note">Beginner-friendly prototype — easy to extend.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Updated Furniture Rescue Race — Prototype
+   - Ensures parts are replenished so the player can't get stuck.
+   - Start overlay with instructions and Start button.
+   - Challenge mode: deliver 3 furniture items in 5 minutes (win/lose screens).
+   - Relaxed mode remains without a timer.
+   Controls: Arrow keys / WASD to move, E to interact. Mouse to use bench UI.
+*/
+
+// ---------- CONFIG ----------
+const CANVAS_W = 1100;
+const CANVAS_H = 700;
+const PLAYER_RADIUS = 16;
+const INVENTORY_LIMIT = 6;
+const PART_TYPES = [
+  { id:'top', color:'#f4a261', label:'Top' },
+  { id:'leg', color:'#2a9d8f', label:'Leg' },
+  { id:'cushion', color:'#e76f51', label:'Cushion' }
+];
+// Minimums to ensure the player won't get stuck (enough to build 3 items)
+const MINIMUMS = { top:3, leg:12, cushion:3 };
+
+const REPAIR_THRESHOLD = 60; // must be at least this to assemble
+const TARGET_ORDERS_CHALLENGE = 3; // challenge now requires 3
+const CHALLENGE_SECONDS = 5 * 60; // 5 minutes
+const RESPAWN_INTERVAL_MS = 4000; // check replenishment every 4s
+// ----------------------------
+
+// Canvas and rendering
+const canvas = document.getElementById('game');
+canvas.width = CANVAS_W;
+canvas.height = CANVAS_H;
+const ctx = canvas.getContext('2d', { alpha:false });
+
+// UI elements
+const inventoryEl = document.getElementById('inventory');
+const logEl = document.getElementById('log');
+const benchUI = document.getElementById('bench-ui');
+const benchInvEl = document.getElementById('bench-inv');
+const repairBtn = document.getElementById('repairBtn');
+const discardBtn = document.getElementById('discardBtn');
+const repairProgressWrap = document.getElementById('repairProgressWrap');
+const repairBar = document.getElementById('repairBar');
+const repairText = document.getElementById('repairText');
+const closeBenchBtn = document.getElementById('closeBench');
+const modeBadge = document.getElementById('modeBadge');
+const timerEl = document.getElementById('timer');
+const scoreEl = document.getElementById('score');
+const savedEl = document.getElementById('sustain');
+const relaxedBtn = document.getElementById('relaxedBtn');
+const challengeBtn = document.getElementById('challengeBtn');
+const resetBtn = document.getElementById('resetBtn');
+const recipeButtons = document.querySelectorAll('.assembleBtn');
+const benchMessage = document.getElementById('bench-message');
+
+const startOverlay = document.getElementById('start-overlay');
+const startBtn = document.getElementById('startBtn');
+const startJustInspect = document.getElementById('startJustInspect');
+
+const endOverlay = document.getElementById('end-overlay');
+const endTitle = document.getElementById('end-title');
+const endMessage = document.getElementById('end-message');
+const endStats = document.getElementById('end-stats');
+const endRestart = document.getElementById('end-restart');
+const endRestartChallenge = document.getElementById('end-restart-challenge');
+
+let gameMode = 'relaxed'; // 'relaxed' or 'challenge'
+let timer = null;
+let secondsLeft = 0;
+let score = 0;
+let savedPoints = 0;
+let completedDeliveries = 0;
+let running = false; // set to true after Start
+
+// Map "interactive zones"
+const benchRect = { x: 100, y: 520, w: 240, h: 140, label:'Bench' };
+const orderRect = { x: CANVAS_W - 240, y: 40, w: 200, h: 140, label:'Delivery' };
+const trashRect = { x: CANVAS_W - 240, y: CANVAS_H - 200, w: 200, h: 140, label:'Trash' };
+
+// Player
+const player = {
+  x: CANVAS_W/2, y: CANVAS_H/2, vx:0, vy:0, speed:2.4
+};
+
+// Parts in world
+let parts = []; // {uid,type,x,y,condition,picked}
+let inventory = []; // {uid,type,condition,repairedSincePickup(boolean)} or assembled furniture objects
+let selectedInvIndex = null;
+
+// Repair state
+let repairing = false;
+let currentRepair = null; // {invIndex, startCond, targetTime, elapsed, interval}
+
+// Replenish interval handle
+let replenishInterval = null;
+
+// Orders for challenge mode
+let orderQueue = [];
+
+// Input
+const keys = {};
+
+// Utilities
+function rand(min,max){ return Math.random()*(max-min)+min; }
+function uid(prefix='id'){ return prefix+Math.random().toString(36).slice(2,9); }
+function log(msg){ const p=document.createElement('div'); p.textContent=msg; logEl.prepend(p); while(logEl.childElementCount>60) logEl.lastChild.remove(); }
+
+// Spawn a single part safely (avoids UI zones)
+function spawnPartOfType(type){
+  let x,y,tries=0;
+  do {
+    x = rand(40, CANVAS_W-300);
+    y = rand(80, CANVAS_H-80);
+    tries++;
+  } while ((rectContains(benchRect,x,y) || rectContains(orderRect,x,y) || rectContains(trashRect,x,y)) && tries<80);
+  parts.push({
+    uid: uid('part'),
+    type,
+    x,y,
+    condition: Math.floor(rand(30,90)), // 30-90 initial
+    picked:false
+  });
+}
+
+// Initial spawn with a balanced distribution
+function spawnInitialParts(){
+  parts = [];
+  // ensure at least minimums initially
+  for(const t of PART_TYPES){
+    const count = MINIMUMS[t.id];
+    for(let i=0;i<count;i++) spawnPartOfType(t.id);
+  }
+  // fill up to a comfortable number
+  const extra = 6;
+  for(let i=0;i<extra;i++){
+    const type = PART_TYPES[Math.floor(Math.random()*PART_TYPES.length)].id;
+    spawnPartOfType(type);
+  }
+}
+
+// Ensure part availability by checking world + inventory counts; spawn missing ones
+function ensurePartAvailability(){
+  const counts = { top:0, leg:0, cushion:0 };
+  for(const p of parts){
+    counts[p.type] = (counts[p.type]||0) + 1;
+  }
+  for(const it of inventory){
+    if(it && it.type && counts.hasOwnProperty(it.type)) counts[it.type] = (counts[it.type]||0) + 1;
+  }
+  // spawn missing
+  for(const k in MINIMUMS){
+    const need = MINIMUMS[k] - (counts[k] || 0);
+    for(let i=0;i<need;i++){
+      spawnPartOfType(k);
+      log('A ' + k + ' has been added to the workshop.');
+    }
+  }
+  // also maintain a soft cap so workshop doesn't get crowded:
+  const totalAllowed = 30;
+  if(parts.length > totalAllowed){
+    // leave as-is; don't aggressively remove
+  }
+}
+
+// Rectangle helpers
+function rectContains(r, x, y){ return x>=r.x && x<=r.x+r.w && y>=r.y && y<=r.y+r.h; }
+function circleRectCollide(cx,cy,r,rx,ry,rw,rh){
+  const nearestX = Math.max(rx, Math.min(cx, rx+rw));
+  const nearestY = Math.max(ry, Math.min(cy, ry+rh));
+  const dx = cx-nearestX; const dy = cy-nearestY;
+  return (dx*dx + dy*dy) < (r*r);
+}
+
+// Inventory UI
+function renderInventoryUI(){
+  inventoryEl.innerHTML='';
+  for(let i=0;i<INVENTORY_LIMIT;i++){
+    const slot = document.createElement('div');
+    slot.className='slot';
+    if(i===selectedInvIndex) slot.classList.add('selected');
+    if(inventory[i]){
+      const p = inventory[i];
+      if(p.uid && p.uid.startsWith('furn')){
+        // furniture
+        slot.style.background = '#bdb2ff';
+        slot.innerHTML = `<div style="font-weight:700">${p.name}</div><small>furniture</small>`;
+      } else {
+        const meta = PART_TYPES.find(t=>t.id===p.type);
+        slot.style.background = meta.color;
+        slot.innerHTML = `<div style="font-weight:700">${meta.label}</div><small>${Math.round(p.condition)}%</small>`;
+      }
+    } else {
+      slot.innerHTML = `<div style="color:#aaa">empty</div>`;
+    }
+    inventoryEl.appendChild(slot);
+  }
+}
+
+// Bench inventory UI (click to select)
+function renderBenchInv(){
+  benchInvEl.innerHTML='';
+  inventory.forEach((p,idx)=>{
+    const el = document.createElement('div');
+    el.className='slot';
+    el.style.width='72px'; el.style.height='72px';
+    el.dataset.idx = idx;
+    if(p.uid && p.uid.startsWith('furn')){
+      el.style.background = '#bdb2ff';
+      el.innerHTML = `<div style="font-weight:700">${p.name}</div><small>furniture</small>`;
+    } else {
+      const meta = PART_TYPES.find(t=>t.id===p.type);
+      el.style.background = meta.color;
+      el.innerHTML = `<div style="font-weight:700">${meta.label}</div><small>${Math.round(p.condition)}%</small>`;
+    }
+    if(idx===selectedInvIndex) el.classList.add('selected');
+    el.addEventListener('click', ()=> {
+      selectedInvIndex = idx;
+      renderBenchInv();
+      renderInventoryUI();
+    });
+    benchInvEl.appendChild(el);
+  });
+  if(inventory.length===0){
+    benchInvEl.innerHTML = '<div class="muted">Inventory is empty. Pick parts from the workshop.</div>';
+  }
+}
+
+// Add part to inventory (if space)
+function pickupPart(part){
+  if(!running) return;
+  if(inventory.length >= INVENTORY_LIMIT){
+    log('Inventory full — cannot pick up more parts.');
+    return false;
+  }
+  inventory.push({ uid: uid('inv'), type: part.type, condition: part.condition, repaired:false });
+  part.picked = true;
+  // remove part from world
+  parts = parts.filter(p => p.uid !== part.uid);
+  renderInventoryUI();
+  log('Picked up a ' + part.type + ' ('+ Math.round(inventory[inventory.length-1].condition)+'%)');
+  return true;
+}
+
+// Repair logic (progress bar)
+function startRepair(invIndex){
+  if(repairing) return;
+  if(invIndex < 0 || invIndex >= inventory.length) return;
+  const item = inventory[invIndex];
+  if(item.uid && item.uid.startsWith('furn')) { benchMessage.textContent = 'Cannot repair assembled furniture.'; return; }
+  if(item.condition >= 100){
+    benchMessage.textContent = 'Item already fully repaired.';
+    return;
+  }
+  repairing = true;
+  currentRepair = { invIndex, startCond: item.condition, elapsed:0 };
+  const delta = 100 - item.condition;
+  const timeMs = Math.max(800, Math.min(8000, delta * 80 + 400));
+  currentRepair.totalMs = timeMs;
+  repairProgressWrap.style.display='block';
+  repairBar.style.width = '0%';
+  repairText.textContent = 'Repairing...';
+  const startAt = performance.now();
+  function tick(now){
+    if(!repairing) return;
+    currentRepair.elapsed = now - startAt;
+    const pct = Math.min(1, currentRepair.elapsed / currentRepair.totalMs);
+    repairBar.style.width = (pct*100)+'%';
+    const newCond = Math.round(currentRepair.startCond + pct*(100-currentRepair.startCond));
+    repairText.textContent = `Condition: ${newCond}%`;
+    if(pct>=1){
+      inventory[currentRepair.invIndex].condition = 100;
+      inventory[currentRepair.invIndex].repaired = true;
+      repairing = false;
+      currentRepair = null;
+      repairProgressWrap.style.display='none';
+      renderBenchInv(); renderInventoryUI();
+      benchMessage.textContent = 'Repair complete. Good job!';
+      log('Repaired item to 100%');
+    } else {
+      requestAnimationFrame(tick);
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
+function discardSelected(invIndex){
+  if(invIndex===null || invIndex===undefined) { benchMessage.textContent='No item selected.'; return; }
+  if(invIndex<0 || invIndex>=inventory.length) { benchMessage.textContent='Invalid selection.'; return; }
+  const item = inventory.splice(invIndex,1)[0];
+  selectedInvIndex = null;
+  renderBenchInv(); renderInventoryUI();
+  benchMessage.textContent = `Discarded a ${item.type || item.name}.`;
+  if(gameMode==='challenge'){
+    savedPoints = Math.max(0, savedPoints - 1);
+    updateHUD();
+  }
+  log('Discarded part: ' + (item.type || item.name));
+}
+
+// Assemble recipes
+const RECIPES = {
+  stool: { name:'Stool', needs: { top:1, leg:3 }, points: 10, save: 2 },
+  chair: { name:'Chair', needs: { top:1, leg:4, cushion:1 }, points: 18, save: 4 },
+  table: { name:'Side Table', needs: { top:1, leg:4 }, points: 14, save: 3 }
+};
+
+function canAssemble(recipeKey){
+  const recipe = RECIPES[recipeKey];
+  if(!recipe) return false;
+  const counts = {};
+  inventory.forEach(it => {
+    if(it.uid && it.uid.startsWith('furn')) return;
+    if(it.condition >= REPAIR_THRESHOLD){
+      counts[it.type] = (counts[it.type] || 0) + 1;
+    }
+  });
+  for(const t in recipe.needs){
+    if((counts[t] || 0) < recipe.needs[t]) return false;
+  }
+  return true;
+}
+
+function consumePartsFor(recipeKey){
+  const recipe = RECIPES[recipeKey];
+  const toRemove = [];
+  const need = Object.assign({}, recipe.needs);
+  for(let i=inventory.length-1;i>=0;i--){
+    const it = inventory[i];
+    if(it.uid && it.uid.startsWith('furn')) continue;
+    if(need[it.type] && it.condition >= REPAIR_THRESHOLD){
+      toRemove.push(inventory.splice(i,1)[0]);
+      need[it.type]--;
+    }
+  }
+  selectedInvIndex = null;
+  renderBenchInv(); renderInventoryUI();
+  return toRemove;
+}
+
+function assemble(recipeKey){
+  if(!running) return;
+  if(!canAssemble(recipeKey)){
+    benchMessage.textContent = 'Not enough repaired parts (or parts below 60%). Repair parts first.';
+    return;
+  }
+  const recipe = RECIPES[recipeKey];
+  const usedParts = consumePartsFor(recipeKey);
+  const furniture = { uid: uid('furn'), type:'furn_'+recipeKey, name:recipe.name, points:recipe.points, saved:recipe.save };
+  inventory.push(furniture);
+  benchMessage.textContent = `Assembled ${recipe.name}. Deliver it at the Delivery area.`;
+  log('Assembled: ' + recipe.name);
+}
+
+// Delivery logic
+function deliverIfAtDelivery(){
+  if(!running) return;
+  if(!circleRectCollide(player.x, player.y, PLAYER_RADIUS, orderRect.x, orderRect.y, orderRect.w, orderRect.h)) return;
+  const idx = inventory.findIndex(it => it.uid && it.uid.startsWith('furn'));
+  if(idx === -1){
+    log('No assembled furniture to deliver.');
+    benchMessage.textContent = 'Bring assembled furniture here to deliver.';
+    return;
+  }
+  const item = inventory.splice(idx,1)[0];
+  score += item.points;
+  savedPoints += item.saved;
+  completedDeliveries++;
+  log('Delivered: ' + (item.name || item.type) + ' (+'+item.points+' pts, saved +'+item.saved+')');
+  updateHUD();
+  if(gameMode==='challenge' && completedDeliveries >= TARGET_ORDERS_CHALLENGE){
+    endChallenge(true);
+  }
+  renderInventoryUI();
+  renderBenchInv();
+}
+
+// Mode management
+function setMode(mode){
+  gameMode = mode;
+  if(mode==='relaxed'){
+    modeBadge.textContent = 'Relaxed';
+    if(timer) { clearInterval(timer); timer=null; }
+    secondsLeft = 0;
+  } else {
+    modeBadge.textContent = '5-min Challenge';
+    secondsLeft = CHALLENGE_SECONDS;
+    if(timer) clearInterval(timer);
+    timer = setInterval(()=>{
+      if(!running) return;
+      secondsLeft--;
+      if(secondsLeft<=0){
+        endChallenge(false);
+      }
+      updateHUD();
+    },1000);
+  }
+  resetStatsForMode();
+  updateHUD();
+}
+
+function resetStatsForMode(){
+  score = 0; savedPoints = 0; completedDeliveries = 0;
+  updateHUD();
+}
+
+// End challenge (win or lose)
+function endChallenge(won){
+  if(timer){ clearInterval(timer); timer=null; }
+  running = false;
+  // show overlay with results
+  endOverlay.style.display = 'flex';
+  endOverlay.setAttribute('aria-hidden','false');
+  if(won){
+    endTitle.textContent = 'You Win!';
+    endMessage.textContent = `You delivered ${completedDeliveries} items in time. Well done!`;
+  } else {
+    endTitle.textContent = 'Time\'s Up';
+    endMessage.textContent = `You delivered ${completedDeliveries} items. Try again to increase your score.`;
+  }
+  endStats.textContent = `Score: ${score} • Saved points: ${savedPoints}`;
+}
+
+// HUD update
+function updateHUD(){
+  scoreEl.textContent = 'Score: ' + score;
+  savedEl.textContent = 'Saved: ' + savedPoints;
+  if(gameMode==='challenge'){
+    const mm = Math.floor(secondsLeft/60).toString().padStart(2,'0');
+    const ss = (secondsLeft%60).toString().padStart(2,'0');
+    timerEl.textContent = `Timer: ${mm}:${ss} | Orders: ${completedDeliveries}/${TARGET_ORDERS_CHALLENGE}`;
+  } else {
+    timerEl.textContent = 'Timer: —';
+  }
+}
+
+// Input handlers
+window.addEventListener('keydown', (e)=>{
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d','W','A','S','D'].includes(e.key)){
+    e.preventDefault();
+  }
+  keys[e.key] = true;
+  if((e.key === 'e' || e.key === 'E') && running){
+    handleInteract();
+  }
+});
+window.addEventListener('keyup', (e)=>{ keys[e.key] = false; });
+
+// Handle E interaction: pickup parts, open bench, deliver, open trash
+function handleInteract(){
+  if(!running) return;
+  let nearbyPart = null;
+  let distSq = Infinity;
+  for(const p of parts){
+    const dx = p.x - player.x, dy = p.y - player.y;
+    const d2 = dx*dx + dy*dy;
+    if(d2 < (PLAYER_RADIUS+20)*(PLAYER_RADIUS+20)){
+      if(d2 < distSq){ distSq = d2; nearbyPart = p; }
+    }
+  }
+  if(nearbyPart){
+    pickupPart(nearbyPart);
+    return;
+  }
+  if(circleRectCollide(player.x, player.y, PLAYER_RADIUS, benchRect.x, benchRect.y, benchRect.w, benchRect.h)){
+    openBench();
+    return;
+  }
+  if(circleRectCollide(player.x, player.y, PLAYER_RADIUS, orderRect.x, orderRect.y, orderRect.w, orderRect.h)){
+    deliverIfAtDelivery();
+    return;
+  }
+  if(circleRectCollide(player.x, player.y, PLAYER_RADIUS, trashRect.x, trashRect.y, trashRect.w, trashRect.h)){
+    if(inventory.length>0){
+      const item = inventory.pop();
+      log('Quick-discarded at Trash: ' + (item.type || item.name));
+      savedPoints = Math.max(0, savedPoints - 1);
+      updateHUD();
+      renderInventoryUI(); renderBenchInv();
+    } else {
+      benchMessage.textContent = 'Nothing to discard.';
+    }
+    return;
+  }
+  benchMessage.textContent = 'No interactable object here. Move near parts, Bench, Delivery, or Trash.';
+}
+
+// Bench open/close
+function openBench(){
+  benchUI.style.display='block';
+  renderBenchInv();
+  selectedInvIndex = null;
+  renderInventoryUI();
+}
+closeBenchBtn.addEventListener('click', ()=>{ benchUI.style.display='none'; });
+
+// Repair / discard buttons
+repairBtn.addEventListener('click', ()=> {
+  if(selectedInvIndex===null || selectedInvIndex===undefined) { benchMessage.textContent='Select an item in the bench inventory.'; return; }
+  startRepair(selectedInvIndex);
+});
+discardBtn.addEventListener('click', ()=> {
+  if(selectedInvIndex===null || selectedInvIndex===undefined) { benchMessage.textContent='Select an item to discard.'; return; }
+  discardSelected(selectedInvIndex);
+});
+
+// Recipe buttons
+recipeButtons.forEach(btn=>{
+  btn.addEventListener('click', ()=> {
+    const key = btn.dataset.recipe;
+    assemble(key);
+  });
+});
+
+// Mode buttons
+relaxedBtn.addEventListener('click', ()=>{ if(!running){ setMode('relaxed'); } else { setMode('relaxed'); } relaxedBtn.classList.add('primary'); challengeBtn.classList.remove('primary'); });
+challengeBtn.addEventListener('click', ()=>{ if(!running){ setMode('challenge'); } else { setMode('challenge'); } challengeBtn.classList.add('primary'); relaxedBtn.classList.remove('primary'); });
+
+// Reset
+resetBtn.addEventListener('click', ()=>{
+  if(confirm('Reset the prototype?')) {
+    spawnInitialParts();
+    inventory = [];
+    selectedInvIndex = null;
+    running = false;
+    startOverlay.style.display = 'flex';
+    startOverlay.setAttribute('aria-hidden','false');
+    if(replenishInterval) { clearInterval(replenishInterval); replenishInterval = null; }
+    if(timer){ clearInterval(timer); timer=null; }
+    renderInventoryUI(); renderBenchInv();
+    log('Game reset. Press Start to play.');
+  }
+});
+
+// Start overlay handlers
+startBtn.addEventListener('click', ()=>{
+  const selectedMode = document.querySelector('input[name="startMode"]:checked').value;
+  startOverlay.style.display = 'none';
+  startOverlay.setAttribute('aria-hidden','true');
+  startGame(selectedMode);
+});
+startJustInspect.addEventListener('click', ()=>{
+  const selectedMode = document.querySelector('input[name="startMode"]:checked').value;
+  // allow player to move around but show bench etc — same as startGame but with running true
+  startOverlay.style.display = 'none';
+  startOverlay.setAttribute('aria-hidden','true');
+  startGame(selectedMode);
+});
+
+// End overlay buttons
+endRestart.addEventListener('click', ()=>{
+  endOverlay.style.display = 'none';
+  endOverlay.setAttribute('aria-hidden','true');
+  startOverlay.style.display = 'flex';
+  startOverlay.setAttribute('aria-hidden','false');
+});
+endRestartChallenge.addEventListener('click', ()=>{
+  endOverlay.style.display = 'none';
+  endOverlay.setAttribute('aria-hidden','true');
+  startGame('challenge');
+});
+
+// Init / start
+function startGame(mode){
+  running = true;
+  spawnInitialParts();
+  inventory = [];
+  selectedInvIndex = null;
+  setMode(mode || 'relaxed');
+  renderInventoryUI();
+  renderBenchInv();
+  updateHUD();
+  log('Game started in ' + mode + ' mode. Move with arrows/WASD. Press E to interact.');
+  // start replenisher
+  if(replenishInterval) clearInterval(replenishInterval);
+  replenishInterval = setInterval(()=>{ if(running) ensurePartAvailability(); }, RESPAWN_INTERVAL_MS);
+}
+
+// Assemble helpers and recipes already defined above
+
+// Init fallback (show overlay)
+function init(){
+  renderInventoryUI();
+  renderBenchInv();
+  updateHUD();
+  log('Welcome to Furniture Rescue Race (Updated Prototype). Press Start to begin.');
+}
+init();
+
+// Game loop
+function gameLoop(){
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+
+// Update movement & interactions
+function update(){
+  if(!running) return; // do not move or interact until started
+  let moveX = 0, moveY = 0;
+  if(keys['ArrowUp'] || keys['w']|| keys['W']) moveY = -1;
+  if(keys['ArrowDown'] || keys['s']|| keys['S']) moveY = 1;
+  if(keys['ArrowLeft'] || keys['a']|| keys['A']) moveX = -1;
+  if(keys['ArrowRight'] || keys['d']|| keys['D']) moveX = 1;
+  if(moveX!==0 || moveY!==0){
+    const len = Math.hypot(moveX,moveY);
+    player.x += (moveX/len) * player.speed;
+    player.y += (moveY/len) * player.speed;
+    player.x = Math.max(20, Math.min(CANVAS_W-20, player.x));
+    player.y = Math.max(20, Math.min(CANVAS_H-20, player.y));
+  }
+}
+
+// Draw everything
+function draw(){
+  // background
+  ctx.fillStyle = '#e8e8e8';
+  ctx.fillRect(0,0,CANVAS_W, CANVAS_H);
+
+  // grid (workshop floor)
+  ctx.strokeStyle = '#d0d0d0'; ctx.lineWidth = 1;
+  for(let x=0;x<CANVAS_W;x+=40){
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,CANVAS_H); ctx.stroke();
+  }
+  for(let y=0;y<CANVAS_H;y+=40){
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(CANVAS_W,y); ctx.stroke();
+  }
+
+  // draw bench area
+  ctx.fillStyle = '#cfc'; ctx.fillRect(benchRect.x, benchRect.y, benchRect.w, benchRect.h);
+  ctx.fillStyle = '#000'; ctx.font = '16px sans-serif'; ctx.fillText('Bench (E)', benchRect.x+10, benchRect.y+24);
+
+  // draw delivery area
+  ctx.fillStyle = '#cce7ff'; ctx.fillRect(orderRect.x, orderRect.y, orderRect.w, orderRect.h);
+  ctx.fillStyle = '#000'; ctx.fillText('Delivery (E)', orderRect.x+10, orderRect.y+24);
+  ctx.fillStyle = '#000'; ctx.font='12px sans-serif'; ctx.fillText(`Progress: ${completedDeliveries}/${gameMode==='challenge'?TARGET_ORDERS_CHALLENGE:'—'}`, orderRect.x+10, orderRect.y+44);
+
+  // draw trash area
+  ctx.fillStyle = '#ffd6d6'; ctx.fillRect(trashRect.x, trashRect.y, trashRect.w, trashRect.h);
+  ctx.fillStyle = '#000'; ctx.fillText('Trash (E)', trashRect.x+10, trashRect.y+24);
+
+  // parts
+  for(const p of parts){
+    const meta = PART_TYPES.find(t=>t.id===p.type);
+    ctx.beginPath();
+    ctx.fillStyle = meta.color;
+    ctx.arc(p.x, p.y, 14, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.font = '11px sans-serif';
+    ctx.fillText(meta.label[0].toUpperCase(), p.x-5, p.y+4);
+    // condition ring
+    ctx.beginPath();
+    ctx.strokeStyle = '#444'; ctx.lineWidth=3;
+    ctx.arc(p.x, p.y, 18, -Math.PI/2, -Math.PI/2 + (p.condition/100)*(Math.PI*2));
+    ctx.stroke();
+  }
+
+  // player
+  ctx.beginPath();
+  ctx.fillStyle = '#333';
+  ctx.arc(player.x, player.y, PLAYER_RADIUS, 0, Math.PI*2);
+  ctx.fill();
+  // player face
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(player.x-6, player.y-6, 12, 6);
+
+  // HUD pointers: inventory count
+  ctx.fillStyle = '#000';
+  ctx.font = '13px sans-serif';
+  ctx.fillText('Inventory: ' + inventory.length + '/' + INVENTORY_LIMIT, 18, CANVAS_H-18);
+
+  // Display nearby interact hints
+  let hint = '';
+  for(const p of parts){
+    const dx = p.x - player.x, dy = p.y - player.y;
+    if(dx*dx+dy*dy < (PLAYER_RADIUS+20)*(PLAYER_RADIUS+20)){
+      hint = `Press E to pick up: ${p.type} (${Math.round(p.condition)}%)`;
+      break;
+    }
+  }
+  if(!hint){
+    if(circleRectCollide(player.x, player.y, PLAYER_RADIUS, benchRect.x, benchRect.y, benchRect.w, benchRect.h)) hint = 'Press E to open Bench';
+    if(circleRectCollide(player.x, player.y, PLAYER_RADIUS, orderRect.x, orderRect.y, orderRect.w, orderRect.h)) hint = 'Press E to Deliver assembled furniture';
+    if(circleRectCollide(player.x, player.y, PLAYER_RADIUS, trashRect.x, trashRect.y, trashRect.w, trashRect.h)) hint = 'Press E to discard an item (quick discard)';
+  }
+  ctx.fillStyle = '#222';
+  ctx.fillText(hint, 18, CANVAS_H-40);
+
+  // small legend
+  ctx.fillStyle = '#222';
+  ctx.font = '12px sans-serif';
+  ctx.fillText('Parts: Top (orange), Leg (teal), Cushion (salmon). Repair parts at Bench before assembling.', 18, 28);
+}
+
+// Accessibility: prevent arrow key page scroll
+window.addEventListener("keydown", function(e) {
+  if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].indexOf(e.key) > -1) {
+    e.preventDefault();
+  }
+}, false);
+
+</script>
+</body>
+</html>
